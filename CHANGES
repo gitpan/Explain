@@ -1,4 +1,13 @@
-Version 0.4 beta  27/02/97
+Version 0.5 beta  02/06/98
+--------------------------
+Changes made to work with Tk800.005.
+Fixed bug with grab due to Oracle's inconsistent storage of the hash_value
+column in v$sqlarea and v$sqltext_with_newlines.
+Disallowed multiple concurrent login/save/open dialogs.
+Fixed double-posting of login dialog on startup.
+Tried to make it less Oracle version dependent.
+
+Version 0.4 beta  27/02/98
 --------------------------
 Grab functionality added, to allow interrogation of Oracle's SQL cache
 Bind variables used wherever possible to prevent unnecessary reparses of the
@@ -7,14 +16,14 @@ Extra error checking
 Various code cleanups & restructuring
 More extensive commenting of the source
 
-Version 0.3 beta  19/02/97
+Version 0.3 beta  19/02/98
 --------------------------
 Changed to use new Tk FileSelect instead of older FileDialog.
 Added facility to supply user/pass@database & SQL filename on the command-line.
 Thanks to Eric Zylberstejn <ezylbers@capgemini.fr> for the patch + suggestions.
 Added check on login to Oracle for a PLAN_TABLE in the user's schema.
 
-Version 0.2 beta  05/02/97
+Version 0.2 beta  05/02/98
 --------------------------
 Changed to work with both Oracle 7 and 8 statistics.
 Pop-up table & index description dialogs added.

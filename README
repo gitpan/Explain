@@ -39,10 +39,10 @@ PREREQUISITES
 -------------
 1.  Oracle 7 or Oracle 8, with SQL*Net if appropriate
 2.  Perl 5.004_04 or later
-3.  DBI version 0.91 or later
-4.  DBD::Oracle 0.47 or later
-5.  Tk 402.004 or later
-6.  Tk-Tree 0.05 or later
+3.  DBI version 0.93 or later
+4.  DBD::Oracle 0.49 or later
+5.  Tk 800.005 or later
+6.  Tk-Tree 3.00401 or later
 
 Items 2 through 6 can be obtained from any CPAN mirror.
 
