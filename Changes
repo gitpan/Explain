@@ -1,3 +1,13 @@
+Version 1.0  02/03/99
+---------------------
+Added ability to switch into a schema other than that of the logged-in user
+ - Menu option added to switch schema in explain window
+ - Capture window now displays which user first executed the SQL
+ - Automatic schema switch when SQL is copied from capture window into explain
+   window
+ - Added full username and schema name to window title
+Fixed duplicated key bindings on menus
+
 Version 0.8 beta  29/12/98
 --------------------------
 Even more GUI improvements as suggested by Steve Humpage
