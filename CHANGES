@@ -1,0 +1,17 @@
+Version 0.3 beta  19/02/97
+--------------------------
+Changed to use new Tk FileSelect instead of older FileDialog.
+Added facility to supply user/pass@database & SQL filename on the command-line.
+Thanks to Eric Zylberstejn <ezylbers@capgemini.fr> for the patch + suggestions.
+Added check on login to Oracle for a PLAN_TABLE in the user's schema.
+
+Version 0.2 beta  05/02/97
+--------------------------
+Changed to work with both Oracle 7 and 8 statistics.
+Pop-up table & index description dialogs added.
+First public version.
+
+Version 0.1 beta  27/01/98
+--------------------------
+Initial version.
+Not publically released.

@@ -1,0 +1,541 @@
+#!/usr/local/bin/perl -w
+
+################################################################################
+# Copyright (c) 1998 Alan Burlison
+#
+# You may distribute under the terms of either the GNU General Public License
+# or the Artistic License, as specified in the Perl README file, with the
+# exception that it cannot be placed on a CD-ROM or similar media for commercial
+# distribution without the prior approval of the author.
+#
+# This code is provided with no warranty of any kind, and is used entirely at
+# your own risk.
+#
+# This code was written by the author as a private individual, and is in no way
+# endorsed or warrantied by Sun Microsystems.
+#
+# Support questions and suggestions can be directed to Alan.Burlison@uk.sun.com
+#
+################################################################################
+
+use strict;
+use IO::File;
+use File::Basename;
+use Cwd;
+use DBI;
+use Tk;
+use Tk::Dialog;
+use Tk::FileSelect;
+use Tk::ROText;
+use Tk::Tree;
+
+use vars qw($VERSION);
+$VERSION = "0.3 beta";
+
+use vars qw($Db $OracleVersion $DatDir $Plan $Main $Title $Tree $Details $Sql);
+
+################################################################################
+
+sub error($@)
+{
+my ($parent) = shift(@_);
+$Main->Dialog(-title      => "Error",
+              -bitmap     => "error",
+              -text       => join("\n", @_),
+              -wraplength => "5i",
+              -buttons    => ["OK"] )->Show();
+}
+
+################################################################################
+
+sub clear_all()
+{
+$Title->configure(-text => 'Query Plan') if ($Title);
+$Tree->delete('all') if ($Tree);
+$Details->delete('1.0', 'end') if ($Details);
+}
+
+################################################################################
+
+sub disp_tree()
+{
+$Title->configure(-text => $Plan->{title});
+$Tree->delete('all');
+foreach my $step (@{$Plan->{id}})
+   {
+   $Tree->add($step->{key}, -text => $step->{desc});
+   }
+$Tree->SetModes();
+}
+
+################################################################################
+
+sub disp_step($)
+{
+my ($key) = @_;
+my $row = $Plan->{key}{$key};
+$Details->delete('1.0', 'end');
+my $info = "";
+$info .= "Id:\t$row->{ID}\tPosition:\t$row->{POSITION}\t"
+       . "Parent Id:\t$row->{PARENT_ID}\n";
+$info .= "Cost:\t$row->{COST}\tCardinality:\t$row->{CARDINALITY}\t"
+       . "Bytes:\t\t$row->{BYTES}\n"
+   if ($row->{COST});
+$info .= "\nPartition\nStart:\t$row->{PARTITION_START}\tStop:\t\t"
+       . "$row->{PARTITION_STOP}\tId:\t\t$row->{PARTITION_ID}\n"
+   if ($row->{PARTITION_START});
+$info .= "\n$row->{OTHER}" if ($row->{OTHER});
+$Details->insert('1.0', $info);
+}
+
+################################################################################
+
+sub disp_obj($)
+{
+my ($key) = @_;
+my $row = $Plan->{key}{$key};
+return(1) if (! $row->{OBJECT_NAME});
+my $qry = $Db->prepare(qq(
+   select object_type from all_objects
+   where object_name = '$row->{OBJECT_NAME}' and owner = '$row->{OBJECT_OWNER}'
+));
+$qry->execute() || die("Object type: $DBI::errstr\n");
+my ($object_type) = $qry->fetchrow();
+$qry->finish();
+$object_type = ucfirst(lc($object_type));
+if ($object_type ne 'Table' && $object_type ne 'Index')
+   {
+   die("Unknown object type $object_type",
+       "for $row->{OBJECT_OWNER}.$row->{OBJECT_NAME}\n");
+   }
+
+my $dialog = $Main->Toplevel(-title => $object_type);
+my $box = $dialog->Frame(-borderwidth => 2, -relief => 'raised');
+$box->Label(-text => "$row->{OBJECT_OWNER}.$row->{OBJECT_NAME}",
+           -relief => 'ridge', -borderwidth => 1)
+   ->grid(-column => 0, -row => 0, -columnspan => 2, -sticky => 'we');
+
+if ($object_type eq 'Table')
+   {
+   $box->Label(-text => " Name ", -relief => 'ridge', -borderwidth => 1)
+      ->grid(-column => 0, -row => 1, -sticky => 'we');
+   $box->Label(-text => " Type ", -relief => 'ridge', -borderwidth => 1)
+      ->grid(-column => 1, -row => 1, -sticky => 'we');
+   $qry = $Db->prepare(qq(
+      select column_name, data_type, data_length, data_precision, data_scale
+      from all_tab_columns
+      where owner = '$row->{OBJECT_OWNER}'
+         and table_name = '$row->{OBJECT_NAME}'
+      order by column_id
+   ));
+   $qry->execute() || die("Table columns: $DBI::errstr\n");
+   my $row = 2;
+   while ((my ($name, $type, $length, $precision, $scale) = $qry->fetchrow()))
+      {
+      $box->Label(-text => "$name   ")
+         ->grid(-column => 0, -row => $row, -sticky => 'w');
+      if ($precision)
+         {
+         $type .= "($precision";
+         $type .= ",$scale" if ($scale);
+         $type .= ")";
+         }
+      elsif ($type =~ /CHAR/)
+         {
+         $type .= "($length)";
+         }
+      $box->Label(-text => $type)
+         ->grid(-column => 1, -row => $row, -sticky => 'w');
+      $row++;
+      }
+   $qry->finish();
+   }
+else
+   {
+   $box->Label(-text => " Table ", -relief => 'ridge', -borderwidth => 1)
+      ->grid(-column => 0, -row => 1, -sticky => 'we');
+   $box->Label(-text => " Column ", -relief => 'ridge', -borderwidth => 1)
+      ->grid(-column => 1, -row => 1, -sticky => 'we');
+   $qry = $Db->prepare(qq(
+      select table_owner, table_name, column_name
+      from all_ind_columns
+      where index_owner = '$row->{OBJECT_OWNER}'
+         and index_name = '$row->{OBJECT_NAME}'
+      order by column_position
+   ));
+   $qry->execute() || die("Index columns: $DBI::errstr\n");
+   my $row = 2;
+   while ((my ($owner, $table, $column) = $qry->fetchrow()))
+      {
+      $box->Label(-text => "$owner.$table   ")
+         ->grid(-column => 0, -row => $row, -sticky => 'w');
+      $box->Label(-text => $column)
+         ->grid(-column => 1, -row => $row, -sticky => 'w');
+      $row++;
+      }
+   $qry->finish();
+   }
+
+$box->pack();
+$dialog->Button(-text => 'Close', -command => sub { $dialog->destroy(); })
+   ->pack(-pady => 3);
+}
+
+################################################################################
+
+sub explain
+{
+# Check there is some SQL
+my $stmt = $Sql->get('1.0', 'end');
+$stmt =~ s/;//g;
+die("You have not supplied any SQL\n") if ($stmt =~ /^\s*$/);
+
+# Check we are logged on
+die("You are not logged on to Oracle\n") if (! $Db);
+
+# Boilerplate stuff
+my $prefix = "explain plan set statement_id = '$$' for ";
+my $plan_sql =
+qq(select level, operation, options, object_node, object_owner, object_name,
+   object_instance, object_type, id, parent_id, position, cost,
+   cardinality, bytes, other_tag, other);
+if ($OracleVersion ge '8')
+   { $plan_sql .= qq(, partition_start, partition_stop, partition_id) };
+$plan_sql .= qq(
+from plan_table
+where statement_id = '$$'
+connect by prior id = parent_id and statement_id = '$$'
+start with id = 0 and statement_id = '$$');
+
+$Db->do("delete from plan_table where statement_id = '$$'")
+   || die("Delete from plan_table: $DBI::errstr\n");
+$Db->commit();
+
+# Explain the plan
+$Plan = { sql => $stmt };
+$Db->do($prefix . $stmt) || die("Explain plan: $DBI::errstr\n");
+
+# Read back the plan
+my $qry = $Db->prepare($plan_sql);
+$qry->execute() || die("Read plan: $DBI::errstr\n");
+while (my $row = $qry->fetchrow_hashref())
+   {
+   if ($row->{ID} == 0)
+      {
+      $Plan->{title} = "Query Plan for " . lc($row->{OPERATION});
+      $Plan->{title} .= ".  Cost = $row->{POSITION}" if ($row->{POSITION});
+      }
+   else
+      {
+      # Line wrap the OTHER field
+      $row->{OTHER} =~ s/((.{1,80})(\s+|,|$))/$1\n/g if ($row->{OTHER});
+
+      # Construct a descriptive string for the query step
+      my $desc = "$row->{OPERATION}";
+      $desc .= " $row->{OPTIONS}" if ($row->{OPTIONS});
+      $desc .= " $row->{OBJECT_TYPE}" if ($row->{OBJECT_TYPE});
+      $desc .= " of $row->{OBJECT_OWNER}.$row->{OBJECT_NAME}"
+         if ($row->{OBJECT_OWNER});
+      $desc .= " using PQS $row->{OBJECT_NODE} $row->{OTHER_TAG}"
+         if ($row->{OBJECT_NODE});
+      $row->{desc} = $desc;
+
+      # Construct a hierarchical key for the query step
+      if (! $row->{PARENT_ID})
+         {
+         my $key = "$row->{POSITION}";
+         $row->{key} = $key;
+         $Plan->{id}[$row->{ID} - 1] = $row;
+         $Plan->{key}{$key} = $row;
+         }
+      else
+         {
+         my $parent = $Plan->{id}[$row->{PARENT_ID} - 1];
+         my $key = "$parent->{key}.$row->{POSITION}";
+         $row->{key} = $key;
+         $Plan->{id}[$row->{ID} - 1] = $row;
+         $Plan->{key}{$key} = $row;
+         $parent->{child}[$row->{POSITION} - 1] = $row;
+         }
+      }
+   }
+$Plan->{tree} = $Plan->{id}[0];
+
+$qry->finish();
+$Db->do("delete from plan_table where statement_id = '$$'");
+$Db->commit();
+}
+
+################################################################################
+
+sub login($$$)
+{
+my ($database, $username, $password) = @_;
+if ($Db)
+   {
+   $Db->disconnect();
+   $Db = undef;
+   }
+$Db = DBI->connect("dbi:Oracle:$database", $username, $password,
+                          { AutoCommit => 0, PrintError => 0})
+   || die("Can't login to Oracle: $DBI::errstr\n");
+$Db->{LongReadLen} = 4096;
+$Db->{LongTruncOk} = 1;
+
+# Check there is a plan_table for this user
+my $qry = $Db->prepare("select 1 from user_tables " .
+                       "where table_name = 'PLAN_TABLE'");
+$qry->execute();
+if (! $qry->fetchrow())
+   {
+   $qry->finish();
+   $Db->disconnect();
+   $Db = undef;
+   die("User $username does not have a PLAN_TABLE.\n",
+       "Run the script utlxplan.sql to create one.\n");
+   }
+
+# Check the Oracle version
+$qry = $Db->prepare("select version from product_component_version " .
+                       "where lower(product) like '%oracle%'");
+if (! $qry->execute())
+   {
+   my $err = $DBI::errstr;
+   $qry->finish();
+   $Db->disconnect();
+   $Db = undef;
+   die("Can't fetch Oracle version: $err\n");
+   }
+($OracleVersion) = $qry->fetchrow();
+$qry->finish();
+}
+
+################################################################################
+
+sub login_cb($$$$)
+{
+my ($parent, $database, $username, $password) = @_;
+if (! eval { login($database, $username, $password); })
+   {
+   error($Main, $@);
+   $parent->Popup();
+   $parent->grab();
+   return(0);
+   }
+return(1);
+}
+
+################################################################################
+
+sub disp_obj_cb($)
+{
+my ($key) = @_;
+if (! eval { disp_obj($key); })
+   {
+   error($Main, $@);
+   }
+}
+
+################################################################################
+
+sub explain_cb
+{
+clear_all();
+if (! eval { explain(); })
+   {
+   error($Main, $@);
+   return;
+   }
+disp_tree();
+}
+
+################################################################################
+
+sub login_dialog($)
+{
+my ($parent) = @_;
+
+my $username = '/';
+my $password = '';
+my $database = $ENV{TWO_TASK} || $ENV{ORACLE_SID};
+
+my $dialog = $parent->Toplevel(-title => 'Login to Oracle');
+my $box;
+
+$box = $dialog->Frame(-borderwidth => 1, -relief => 'raised');
+$box->Label(-text => 'Username')
+   ->grid(-column => 0, -row => 0, -sticky => 'w');
+$box->Entry(-textvariable => \$username, -width => 30)
+   ->grid(-column => 1, -row => 0, -sticky => 'w');
+$box->Label(-text => 'Password')
+   ->grid(-column => 0, -row => 1, -sticky => 'w');
+$box->Entry(-textvariable => \$password, -width => 30, -show => '*')
+   ->grid(-column => 1, -row => 1, -sticky => 'w');
+$box->Label(-text => 'Database')
+   ->grid(-column => 0, -row => 2, -sticky => 'w');
+$box->Entry(-textvariable => \$database, -width => 30)
+   ->grid(-column => 1, -row => 2, -sticky => 'w');
+$box->pack(-expand => 1, -fill => 'both');
+
+$box = $dialog->Frame(-borderwidth => 1, -relief => 'raised');
+my $cb = sub
+   {
+   $dialog->destroy() if login_cb($dialog, $database, $username, $password);
+   };
+$box->Button(-text => 'Login', -command => $cb)
+   ->pack(-side => 'left', -expand => 1, -pady => 3);
+$box->Button(-text => 'Cancel', -command => sub { $dialog->destroy() })
+   ->pack(-side => 'right', -expand => 1, -pady => 3);
+$box->pack(-expand => 1, -fill => 'both');
+$dialog->Popup();
+$dialog->grab();
+}
+
+################################################################################
+
+sub open_file($)
+{
+my ($file) = @_;
+my $fh;
+if (! ($fh = IO::File->new($file, "r")))
+   {
+   error("Cannot open $file", $!);
+   return(0);
+   }
+
+$Sql->delete('1.0', 'end');
+while (my $line = $fh->getline())
+   {
+   $Sql->insert('end', $line);
+   }
+$fh->close();
+return(1);
+}
+
+################################################################################
+
+sub open_dialog($)
+{
+my ($parent) = @_;
+
+$parent->Busy();
+$DatDir = cwd() if (! $DatDir);
+my $filesel = $parent->FileSelect(-title     => "Open File",
+                                  -create    => 0,
+                                  -directory => $DatDir,
+                                  -filter    => "*");
+$parent->Unbusy();
+my $file = $filesel->Show();
+return if (! $file);
+$DatDir = $filesel->cget(-directory);
+open_file($file);
+}
+
+################################################################################
+
+sub save_dialog($)
+{
+my ($parent) = @_;
+$parent->Busy();
+$DatDir = cwd() if (! $DatDir);
+my $filesel = $parent->FileSelect(-title     => "Save File",
+                                  -create    => 1,
+                                  -directory => $DatDir,
+                                  -filter    => "*");
+$parent->Unbusy();
+my $file = $filesel->Show();
+return if (! $file);
+$DatDir = $filesel->cget(-directory);
+
+my $fh;
+if (! ($fh = IO::File->new($file, "w")))
+   {
+   error("Cannot open $file", $!);
+   return;
+   }
+
+$fh->print($Sql->get('1.0', 'end'));
+$fh->close();
+}
+
+################################################################################
+# Main
+
+### Main window
+$Main = MainWindow->new();
+$Main->title('explain');
+
+### Menubar
+my $menubar = $Main->Frame(-relief => 'raised', -borderwidth => 2);
+$menubar->pack(-fill => 'x');
+
+my $menubar_file = $menubar->Menubutton(-text => 'File', -underline => 0);
+$menubar_file->command(-label => 'Login ...', -underline => 0,
+   -command => sub { login_dialog($Main); });
+$menubar_file->separator();
+$menubar_file->command(-label => 'Open File ...', -underline => 0,
+   -command => sub { open_dialog($Main); });
+$menubar_file->command(-label => 'Save File ...', -underline => 0,
+   -command => sub { save_dialog($Main); });
+$menubar_file->separator();
+$menubar_file->command(-label => 'Exit', -underline => 1,
+   -command => sub { $Db->disconnect() if ($Db); exit(0); });
+$menubar_file->pack(-side => 'left');
+
+### Query plan tree
+my $frame;
+$frame = $Main->Frame(-borderwidth => 3, -relief => 'raised');
+$Title = $frame->Label(-text => 'Query Plan')->pack(-anchor => 'nw');
+$Tree = $frame->Scrolled('Tree', -height => 15, -width => 80,
+                         -borderwidth => 0, -scrollbars => 'osoe',
+                         -browsecmd => \&disp_step, -command => \&disp_obj_cb)
+   ->pack(-expand => 1, -fill => 'both');
+$frame->pack(-expand => 1, -fill => 'both');
+
+### Query plan statement details
+$frame = $Main->Frame(-borderwidth => 3, -relief => 'raised');
+$frame->Label(-text => 'Query Step Details')->pack(-anchor => 'nw');
+$Details = $frame->ROText(-height => 10, -width => 80, -borderwidth => 0)
+   ->pack(-fill => 'x');
+$frame->pack(-fill => 'x');
+
+### SQL text editor
+$frame = $Main->Frame(-borderwidth => 3, -relief => 'raised');
+$frame->Label(-text => 'SQL Editor')->pack(-anchor => 'nw');
+$Sql = $frame->Scrolled('Text', -setgrid => 'true', -scrollbars => 'oe',
+                        -borderwidth => 0, -height => 15, -width => 80)
+   ->pack(-expand => 1, -fill => 'both');
+$frame->pack(-expand => 1, -fill => 'both');
+
+### Buttons
+$frame = $Main->Frame(-borderwidth => 3, -relief => 'raised');
+$frame->Button(-text => 'Explain', -command => \&explain_cb)->pack(-pady => 3);
+$frame->pack(-fill => 'x');
+
+### user/pass@db command-line argument
+if (@ARGV >= 1 && $ARGV[0] =~ /\w*\/\w*(@\w+)?/)
+   {
+   my ($username, $password, $database) = split(/[\/@]/, shift(@ARGV));
+   if (! $username) { $username = '/'; $password = ''; }
+   if (! $database) { $database = $ENV{TWO_TASK} || $ENV{ORACLE_SID}; }
+   login_cb($Main, $database, $username, $password);
+   }
+else
+   {
+   login_dialog($Main);
+   }
+
+### SQL filename argument
+if (@ARGV >= 1 && -r $ARGV[0])
+   {
+   my $file = shift(@ARGV);
+   if (open_file($file))
+      {
+      $DatDir = dirname($file);
+      explain_cb() if ($Db);
+      }
+   }
+
+MainLoop();
+
+################################################################################
