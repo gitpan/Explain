@@ -1,3 +1,19 @@
+Version 0.7 beta  10/11/98
+--------------------------
+Yet more GUI enhancements as suggested by Tim Bunce.
+ - Feedback during SQL cache 'grab'.
+ - Better highlighting of currently selected item in SQL cache area.
+ - Sorting of captured by sql by total or average values.
+ - Display of index information on table viewer.
+ - Online help and splash screen.
+Also, some attempts made to speed up load time, and to 'cache' windows so that
+subsequent activations should be much faster.
+Now installs with the standard 'perl Makefile.PL; make install' incantation.
+
+Version 0.6 beta  19/08/98
+--------------------------
+Various minor GUI improvements as suggested by Tim Bunce.
+
 Version 0.5 beta  02/06/98
 --------------------------
 Changes made to work with Tk800.005.
