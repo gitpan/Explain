@@ -63,7 +63,7 @@ $w->Callback(-b3command => $ent);
 
 package main;
 use vars qw($VERSION);
-$VERSION = "0.7_beta";
+$VERSION = "0.8_beta";
 
 # Globals
 #   $ProgName        Program name (without pathname)
@@ -108,14 +108,36 @@ else { $PlanMain->Unbusy(1); }
 
 sub error($@)
 {
-my ($parent, @msg) = @_;
-require Tk::Dialog;
+my ($parent, @lines) = @_;
+
+my ($msg, $height, $width);
+$msg = join("\n", @lines);
+$msg =~ s/\n$//;
+$msg =~ s/ \(DBD:/\n(DBD:/;
+$msg =~ s/(indicator at char \d+ in) /$1\n/;
+@lines = split("\n", $msg);
+$height = @lines;
+$width = 0;
+foreach my $line (@lines)
+   { my $l = length($line); $width = $l if ($l > $width); }
+$width = 80 if ($width > 80);
+$height = 4 if ($height < 4);
+$height = 10 if ($height > 10);
+
 busy(0);
-$PlanMain->Dialog(-title      => "Error",
-                  -bitmap     => "error",
-                  -text       => join("\n", @msg),
-                  -wraplength => 80 * $CharWidth,
-                  -buttons    => ["OK"] )->Show();
+my $dialog = $PlanMain->Toplevel(-title => "Error");
+$dialog->withdraw();
+my $text = $dialog->Scrolled("ROText", -height => $height, -width => $width,
+                             -borderwidth => 3, -relief => "raised",
+                             -wrap => "word", -scrollbars => "oe")
+   ->pack(-padx => 6, -pady => 6, -expand => 1, -fill => "both");
+$text->insert("1.0", $msg);
+
+my $ok_cb = sub { $dialog->destroy() };
+$dialog->Button(-text => "OK", -default => "active", -command => $ok_cb)
+   ->pack(-padx => 6, -pady => 6);
+$dialog->bind("<KeyPress-Return>", $ok_cb);
+$dialog->Popup;
 }
 
 ################################################################################
@@ -635,7 +657,7 @@ die("You are not logged on to Oracle\n") if (! $Db);
 
 # Set up the various query strings
 # Note that for some reason you can't use bind variables in 'explain plan'
-my $prefix = "explain plan set statement_id = '$$' for ";
+my $prefix = "explain plan set statement_id = '$$' for\n";
 my $plan_sql = qq(
    $SqlMarker select level, operation, options, object_node, object_owner,
       object_name, object_instance, object_type, id, parent_id, position,
@@ -655,17 +677,17 @@ $plan_sql .= qq(
 busy(1);
 $Db->do(qq($SqlMarker delete from plan_table where statement_id = :1),
         undef, $$)
-   || die("Delete from plan_table: $DBI::errstr\n");
+   || die("Delete from plan_table:\n$DBI::errstr\n");
 $Db->commit();
 
 # Explain the plan
 $Plan = { sql => $stmt };
-$Db->do($prefix . $stmt) || die("Explain plan: $DBI::errstr\n");
+$Db->do($prefix . $stmt) || die("Explain plan:\n$DBI::errstr\n");
 
 # Read back the plan
 my $qry = $Db->prepare($plan_sql)
-   || die("Unsupported PLAN_TABLE format: $DBI::errstr\n");
-$qry->execute($$) || die("Read plan: $DBI::errstr\n");
+   || die("Unsupported PLAN_TABLE format:\n$DBI::errstr\n");
+$qry->execute($$) || die("Read plan:\n$DBI::errstr\n");
 while (my $row = $qry->fetchrow_hashref())
    {
    if ($row->{ID} == 0)
@@ -683,7 +705,7 @@ while (my $row = $qry->fetchrow_hashref())
       $desc .= " $row->{OPTIONS}" if ($row->{OPTIONS});
       $desc .= " $row->{OBJECT_TYPE}" if ($row->{OBJECT_TYPE});
       $desc .= " of $row->{OBJECT_OWNER}.$row->{OBJECT_NAME}"
-         if ($row->{OBJECT_OWNER});
+         if ($row->{OBJECT_OWNER} && $row->{OBJECT_NAME});
       $desc .= " using PQS $row->{OBJECT_NODE} $row->{OTHER_TAG}"
          if ($row->{OBJECT_NODE});
       $row->{desc} = $desc;
@@ -776,13 +798,16 @@ if (! $LoginDialog)
       else
          {
          $LoginDialog->withdraw();
+         $PlanMain->configure(-title =>
+            "$ProgName - connected to $database as $username");
          }
       };
-   $box->Button(-text => "Login", -command => $cb)
+   $box->Button(-text => "Login", -default => "active", -command => $cb)
       ->pack(-side => "left", -expand => 1, -pady => 6);
    $box->Button(-text => "Cancel", -command => sub { $LoginDialog->withdraw() })
       ->pack(-side => "right", -expand => 1, -pady => 6);
    $box->pack(-expand => 1, -fill => "both");
+   $LoginDialog->bind("<KeyPress-Return>", $cb);
    }
    
 # Activate the dialog
@@ -800,7 +825,7 @@ use IO::File;
 my $fh;
 if (! ($fh = IO::File->new($file, "r")))
    {
-   error("Cannot open $file:\n", $!);
+   error($PlanMain, "Cannot open $file:\n", $!);
    return(0);
    }
 
@@ -863,7 +888,7 @@ $FileDir = $SaveDialog->cget(-directory);
 my $fh;
 if (! ($fh = IO::File->new($file, "w")))
    {
-   error("Cannot open $file:\n", $!);
+   error($PlanMain, "Cannot open $file:\n", $!);
    return;
    }
 $fh->print($text->get("1.0", "end"));
@@ -880,8 +905,6 @@ return if (! defined($tag));
 clear_editor();
 $PlanSql->insert("end", $text->get("$tag.first", "$tag.last"));
 $PlanMain->deiconify();
-$PlanMain->raise($GrabMain);
-explain();
 }
 
 ################################################################################
@@ -898,7 +921,7 @@ my $qry = $Db->prepare(qq(
    $SqlMarker select executions, disk_reads, buffer_gets, rows_processed,
                      sorts, loads, parse_calls
    from v\$sqlarea where address = :1
-)) || die("Statement info: $DBI::errstr\n");
+)) || die("Statement info:\n$DBI::errstr\n");
 
 # Read the info.  Note that the statement *may* have been purged from the cache!
 $qry->execute($address);
@@ -1001,7 +1024,7 @@ if ($ordering eq "total")
    { $qry1 .= qq{ order by $order_by desc}; }
 elsif ($ordering eq "average")
    { $qry1 .= qq{ order by $order_by / greatest(executions, 1) desc}; }
-$qry1 = $Db->prepare($qry1) || die("SQL Cache capture: $DBI::errstr\n");
+$qry1 = $Db->prepare($qry1) || die("SQL Cache capture:\n$DBI::errstr\n");
 
 my $qry2;
 if ($OracleVersion ge "7.2")
@@ -1009,24 +1032,24 @@ if ($OracleVersion ge "7.2")
    $qry2 = $Db->prepare(qq(
       $SqlMarker select sql_text from v\$sqltext_with_newlines
       where address = :1 order by piece))
-      || die("SQL text: $DBI::errstr\n");
+      || die("SQL text:\n$DBI::errstr\n");
    }
 else{
    $qry2 = $Db->prepare(qq(
       $SqlMarker select sql_text from v\$sqltext
       where address = :1 order by piece))
-      || die("SQL text: $DBI::errstr\n");
+      || die("SQL text:\n$DBI::errstr\n");
    }
 
 # For each SQL query in the shared pool...
-if ($user) { $qry1->execute($user) || die("SQL text: $DBI::errstr\n"); }
-else { $qry1->execute() || die("SQL text: $DBI::errstr\n"); }
+if ($user) { $qry1->execute($user) || die("SQL text:\n$DBI::errstr\n"); }
+else { $qry1->execute() || die("SQL text:\n$DBI::errstr\n"); }
 my $count = 0;
 my $first_address;
 while ($count != $rows && (my ($address) = $qry1->fetchrow_array()))
    {
    # ...glue together the components of the SQL string & print out
-   $qry2->execute($address) || die("SQL text: $DBI::errstr\n");
+   $qry2->execute($address) || die("SQL text:\n$DBI::errstr\n");
    my ($sql_text) = "";
    while (my ($sql) = $qry2->fetchrow_array())
       {
@@ -1128,7 +1151,7 @@ $menubar_file->command(-label => "Save File ...", -underline => 0,
 $menubar_file->separator();
 $menubar_file->command(-label => "Capture SQL", -underline => 0,
    -command => $grab_cb);
-$menubar_file->command(-label => "Explain", -underline => 0,
+$menubar_file->command(-label => "Copy to Explain", -underline => 0,
    -command => sub { copy_sql($GrabSql, $GrabSelection); });
 $menubar_file->command(-label => "Close", -underline => 0,
    -command => sub { $GrabMain->withdraw(); });
@@ -1257,7 +1280,7 @@ $frame->pack(-fill => "x");
 $frame = $GrabMain->Frame(-borderwidth => 3, -relief => "raised");
 $frame->Button(-text => "Capture SQL", -command => $grab_cb)
    ->pack(-side => "left", -expand => 1, -pady => 6);
-$frame->Button(-text => "Explain",
+$frame->Button(-text => "Copy to Explain",
                -command => sub { copy_sql($GrabSql, $GrabSelection); })
    ->pack(-side => "left", -expand => 1, -pady => 6);
 $frame->Button(-text => "Close", -command => sub { $GrabMain->withdraw(); })
@@ -1270,6 +1293,7 @@ $frame->pack(-fill => "x");
 
 ### Main window
 $ProgName = basename($0);
+$ProgName =~ s/\..*$//;
 $PlanMain = MainWindow->new();
 $PlanMain->withdraw();
 $PlanMain->title($ProgName);

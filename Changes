@@ -1,3 +1,11 @@
+Version 0.8 beta  29/12/98
+--------------------------
+Even more GUI improvements as suggested by Steve Humpage
+ - Better error dialog - handles long messages more gracefully
+ - Various key and mouse binding tweaks
+ - Prevented tree display error caused by inline views
+ - Added database & user name to window title
+
 Version 0.7 beta  10/11/98
 --------------------------
 Yet more GUI enhancements as suggested by Tim Bunce.
